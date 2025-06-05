@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { XAxis, YAxis, CartesianGrid, Tooltip, Legend, LineChart, Line, ResponsiveContainer, ReferenceLine } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, LineChart, Line, ResponsiveContainer, ReferenceLine, ComposedChart } from 'recharts';
 import { Filter } from 'lucide-react';
 import Papa from 'papaparse';
 
@@ -100,7 +100,7 @@ const Dashboard = () => {
     'Questions/hr'
   ];
 
-  // Filter data based on selections
+  // Filter data based on selections (for individual rep display)
   const filteredData = useMemo(() => {
     return data.filter(item => {
       if (filters.selectedReps.length > 0 && !filters.selectedReps.includes(item["User Name"])) return false;
@@ -118,6 +118,69 @@ const Dashboard = () => {
     });
   }, [data, filters]);
 
+  // Calculate team averages from ALL data (not filtered by reps)
+  const getTeamAverages = (metric) => {
+    // Always use ALL data for team averages, only filter by metrics/months/quarters
+    const teamData = data.filter(item => {
+      if (item.Metric !== metric) return false;
+      if (filters.selectedMetrics.length > 0 && !filters.selectedMetrics.includes(item.Metric)) return false;
+      if (filters.selectedMonths.length > 0 && !filters.selectedMonths.includes(item.Month)) return false;
+      
+      // Quarter filtering
+      if (filters.selectedQuarters.length > 0) {
+        const itemQuarter = item.Month?.includes('2025-01') || item.Month?.includes('2025-02') || item.Month?.includes('2025-03') ? 'Q1 2025' :
+                           item.Month?.includes('2025-04') || item.Month?.includes('2025-05') || item.Month?.includes('2025-06') ? 'Q2 2025' : null;
+        if (!filters.selectedQuarters.includes(itemQuarter)) return false;
+      }
+      
+      return item.Value !== null && item.Value !== undefined;
+    });
+
+    const monthlyAverages = {};
+    
+    teamData.forEach(item => {
+      if (!monthlyAverages[item.Month]) {
+        monthlyAverages[item.Month] = {
+          buyside: [],
+          sellside: [],
+          all: []
+        };
+      }
+      
+      monthlyAverages[item.Month].all.push(item.Value);
+      
+      if (buysideTeam.includes(item["User Name"])) {
+        monthlyAverages[item.Month].buyside.push(item.Value);
+      }
+      if (sellsideTeam.includes(item["User Name"])) {
+        monthlyAverages[item.Month].sellside.push(item.Value);
+      }
+    });
+
+    const result = {};
+    Object.keys(monthlyAverages).forEach(month => {
+      result[month] = {};
+      
+      const buysideValues = monthlyAverages[month].buyside;
+      const sellsideValues = monthlyAverages[month].sellside;
+      const allValues = monthlyAverages[month].all;
+      
+      if (buysideValues.length > 0) {
+        result[month]['Buyside Team Avg'] = Math.round((buysideValues.reduce((sum, val) => sum + val, 0) / buysideValues.length) * 100) / 100;
+      }
+      
+      if (sellsideValues.length > 0) {
+        result[month]['Sellside Team Avg'] = Math.round((sellsideValues.reduce((sum, val) => sum + val, 0) / sellsideValues.length) * 100) / 100;
+      }
+      
+      if (allValues.length > 0) {
+        result[month]['Overall Team Avg'] = Math.round((allValues.reduce((sum, val) => sum + val, 0) / allValues.length) * 100) / 100;
+      }
+    });
+
+    return result;
+  };
+
   // Prepare chart data for individual metric
   const getChartDataForMetric = (metric) => {
     const metricData = filteredData.filter(item => item.Metric === metric);
@@ -134,48 +197,35 @@ const Dashboard = () => {
       
       const result = Object.values(grouped);
       
-      // Add team averages if toggled
+      // Add team averages if toggled (calculated from ALL data)
       if (showTeamAverage) {
+        const teamAverages = getTeamAverages(metric);
+        
         result.forEach(monthData => {
-          const getTeamAverage = (teamMembers) => {
-            const values = teamMembers.map(rep => monthData[rep]).filter(v => v !== null && v !== undefined);
-            return values.length > 0 ? Math.round((values.reduce((sum, val) => sum + val, 0) / values.length) * 100) / 100 : null;
-          };
-          
-          if (teamFilter === 'all' || teamFilter === 'buyside') {
-            monthData['Buyside Team Avg'] = getTeamAverage(buysideTeam);
-          }
-          if (teamFilter === 'all' || teamFilter === 'sellside') {
-            monthData['Sellside Team Avg'] = getTeamAverage(sellsideTeam);
-          }
-          if (teamFilter === 'all') {
-            monthData['Overall Team Avg'] = getTeamAverage([...buysideTeam, ...sellsideTeam]);
+          const month = monthData.month;
+          if (teamAverages[month]) {
+            if (teamFilter === 'all' || teamFilter === 'buyside') {
+              monthData['Buyside Team Avg'] = teamAverages[month]['Buyside Team Avg'];
+            }
+            if (teamFilter === 'all' || teamFilter === 'sellside') {
+              monthData['Sellside Team Avg'] = teamAverages[month]['Sellside Team Avg'];
+            }
+            if (teamFilter === 'all') {
+              monthData['Overall Team Avg'] = teamAverages[month]['Overall Team Avg'];
+            }
           }
         });
       }
       
       return result;
     } else {
-      // Team average mode
-      const monthlyData = {};
-      metricData.forEach(item => {
-        if (!monthlyData[item.Month]) {
-          monthlyData[item.Month] = [];
-        }
-        monthlyData[item.Month].push(item.Value);
-      });
+      // Team average mode - show team averages as bars
+      const teamAverages = getTeamAverages(metric);
       
-      return Object.keys(monthlyData).map(month => {
-        const values = monthlyData[month].filter(v => v !== null);
-        const teamAvg = values.length > 0 
-          ? Math.round((values.reduce((sum, val) => sum + val, 0) / values.length) * 100) / 100
-          : null;
-        
-        return {
-          month,
-          'Team Average': teamAvg
-        };
-      });
+      return Object.keys(teamAverages).map(month => ({
+        month,
+        'Team Average': teamAverages[month]['Overall Team Avg']
+      }));
     }
   };
 
@@ -247,61 +297,95 @@ const Dashboard = () => {
     const repKeys = dataKeys.filter(key => !key.includes('Team') && !key.includes('Avg'));
     const teamKeys = dataKeys.filter(key => key.includes('Team') || key.includes('Avg'));
 
-    return (
-      <div key={metric} className="bg-white rounded-lg shadow-sm p-6 mb-6">
-        <h3 className="text-lg font-semibold text-gray-900 mb-4">{metric}</h3>
-        <ResponsiveContainer width="100%" height={400}>
-          <LineChart data={chartData}>
-            <CartesianGrid strokeDasharray="3 3" />
-            <XAxis dataKey="month" />
-            <YAxis tickFormatter={(value) => formatYAxisValue(value, metric)} />
-            <Tooltip 
-              formatter={(value, name) => [
-                formatYAxisValue(value, metric),
-                name
-              ]}
-            />
-            <Legend />
-            
-            {/* Benchmark line */}
-            {benchmarkValue && (
-              <ReferenceLine 
-                y={benchmarkValue} 
-                stroke="#10B981" 
-                strokeDasharray="3 3" 
-                strokeOpacity={0.6}
-                strokeWidth={2}
+    if (viewMode === 'team') {
+      // Team mode - show as bar chart
+      return (
+        <div key={metric} className="bg-white rounded-lg shadow-sm p-6 mb-6">
+          <h3 className="text-lg font-semibold text-gray-900 mb-4">{metric}</h3>
+          <ResponsiveContainer width="100%" height={400}>
+            <BarChart data={chartData}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis dataKey="month" />
+              <YAxis tickFormatter={(value) => formatYAxisValue(value, metric)} />
+              <Tooltip 
+                formatter={(value, name) => [
+                  formatYAxisValue(value, metric),
+                  name
+                ]}
               />
-            )}
-            
-            {/* Individual rep lines */}
-            {repKeys.map((rep, index) => (
-              <Line
-                key={rep}
-                type="monotone"
-                dataKey={rep}
-                stroke={`hsl(${(index * 360) / repKeys.length}, 70%, 50%)`}
-                strokeWidth={2}
-                dot={{ fill: `hsl(${(index * 360) / repKeys.length}, 70%, 50%)`, strokeWidth: 2, r: 4 }}
+              <Legend />
+              
+              {/* Benchmark line */}
+              {benchmarkValue && (
+                <ReferenceLine 
+                  y={benchmarkValue} 
+                  stroke="#10B981" 
+                  strokeDasharray="3 3" 
+                  strokeOpacity={0.6}
+                  strokeWidth={2}
+                />
+              )}
+              
+              <Bar dataKey="Team Average" fill="#8B5CF6" />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      );
+    } else {
+      // Individual mode - bars for reps + lines for team averages
+      return (
+        <div key={metric} className="bg-white rounded-lg shadow-sm p-6 mb-6">
+          <h3 className="text-lg font-semibold text-gray-900 mb-4">{metric}</h3>
+          <ResponsiveContainer width="100%" height={400}>
+            <ComposedChart data={chartData}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis dataKey="month" />
+              <YAxis tickFormatter={(value) => formatYAxisValue(value, metric)} />
+              <Tooltip 
+                formatter={(value, name) => [
+                  formatYAxisValue(value, metric),
+                  name
+                ]}
               />
-            ))}
-            
-            {/* Team average lines */}
-            {teamKeys.map(teamKey => (
-              <Line
-                key={teamKey}
-                type="monotone"
-                dataKey={teamKey}
-                stroke={getTeamLineColor(teamKey)}
-                strokeWidth={4}
-                strokeDasharray="8 4"
-                dot={{ fill: getTeamLineColor(teamKey), strokeWidth: 2, r: 6 }}
-              />
-            ))}
-          </LineChart>
-        </ResponsiveContainer>
-      </div>
-    );
+              <Legend />
+              
+              {/* Benchmark line */}
+              {benchmarkValue && (
+                <ReferenceLine 
+                  y={benchmarkValue} 
+                  stroke="#10B981" 
+                  strokeDasharray="3 3" 
+                  strokeOpacity={0.6}
+                  strokeWidth={2}
+                />
+              )}
+              
+              {/* Individual rep bars */}
+              {repKeys.map((rep, index) => (
+                <Bar
+                  key={rep}
+                  dataKey={rep}
+                  fill={`hsl(${(index * 360) / repKeys.length}, 70%, 50%)`}
+                />
+              ))}
+              
+              {/* Team average lines */}
+              {teamKeys.map(teamKey => (
+                <Line
+                  key={teamKey}
+                  type="monotone"
+                  dataKey={teamKey}
+                  stroke={getTeamLineColor(teamKey)}
+                  strokeWidth={4}
+                  strokeDasharray="8 4"
+                  dot={{ fill: getTeamLineColor(teamKey), strokeWidth: 2, r: 6 }}
+                />
+              ))}
+            </ComposedChart>
+          </ResponsiveContainer>
+        </div>
+      );
+    }
   };
 
   return (
