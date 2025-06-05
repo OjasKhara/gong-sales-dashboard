@@ -1,6 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, LineChart, Line, ResponsiveContainer, ReferenceLine, ComposedChart } from 'recharts';
-import { Filter } from 'lucide-react';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Line, ResponsiveContainer, ReferenceLine, ComposedChart } from 'recharts';import { Filter } from 'lucide-react';
 import Papa from 'papaparse';
 
 const Dashboard = () => {
